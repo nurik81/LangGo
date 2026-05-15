@@ -1,5 +1,8 @@
 import os
-import google.generativeai as genai
+import asyncio
+from aiohttp import web
+from google import genai
+from google.genai import types
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -7,9 +10,9 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, fil
 BOT_TOKEN = "8649876958:AAG91R5UH5V_ILVQ2jc8VJ4clm54w269oh0"
 GEMINI_KEY = "AIzaSyCHSSgiZZYVeUTFmLBGxmOEN8_GNhiqh38"
 
-genai.configure(api_key=GEMINI_KEY)
+# Yangi Google GenAI klienti
+client = genai.Client(api_key=GEMINI_KEY)
 
-# AI uchun vazmin va professional repetitor yo'riqnomasi
 SYSTEM_INSTRUCTION = """
 Sen 'LangGo AI' virtual akademiyasining tajribali va jiddiy o'qituvchisisan.
 Asosiy qoidalaring:
@@ -18,11 +21,6 @@ Asosiy qoidalaring:
 3. JIDDIY OHANG: Foydalanuvchiga 'Siz' deb murojaat qil. Erkalatuvchi so'zlarni ishlatma.
 4. EMOJILAR: Juda kam miqdorda ishlatilsin.
 """
-
-model = genai.GenerativeModel(
-    model_name="gemini-1.5-flash",
-    system_instruction=SYSTEM_INSTRUCTION
-)
 
 # 2. TUGMALAR ⌨️
 main_menu = [['🌍 Jahon tillari', '🔢 Aniq fanlar']]
@@ -58,13 +56,52 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     subject = user_data.get('subject', 'Umumiy')
     try:
         prompt = f"Mavzu: {subject}. Savol: {text}. (Javobni bermasdan yo'nalish ber!)"
-        response = model.generate_content(prompt)
+        
+        # Yangi API bo'yicha so'rov yuborish tartibi
+        response = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=SYSTEM_INSTRUCTION
+            )
+        )
         await update.message.reply_text(response.text)
-    except Exception:
+    except Exception as e:
+        print(f"Xatolik: {e}")
         await update.message.reply_text("Texnik xatolik yuz berdi.")
 
-if __name__ == '__main__':
+# Render portini band qilish uchun soxta HTTP server xizmati
+async def handle_ping(request):
+    return web.Response(text="Bot is running")
+
+async def start_http_server():
+    app = web.Application()
+    app.router.add_get('/', handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    
+    # Render taqdim etadigan portni olish (sukut bo'yicha 10000)
+    port = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    print(f"HTTP server {port}-portda ishga tushdi.")
+
+async def main():
+    # 1. HTTP Serverni orqa fonda ishga tushirish (Render port xatosi bermasligi uchun)
+    await start_http_server()
+
+    # 2. Telegram botni ishga tushirish
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
-    app.run_polling()
+    
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+    
+    # Bot va HTTP server doimiy ishlashi uchun cheksiz sikl
+    while True:
+        await asyncio.sleep(3600)
+
+if __name__ == '__main__':
+    asyncio.run(main())
