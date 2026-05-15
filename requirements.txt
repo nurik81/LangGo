@@ -1,5 +1,5 @@
 python-telegram-bot==21.10
 google-genai==1.7.0
 aiohttp==3.11.11
-pytz
-httpx
+pytz==2024.1
+httpx==0.27.0
